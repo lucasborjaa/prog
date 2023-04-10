@@ -1,1 +1,149 @@
+//@version=4
+study("Soportes y Resistencias Avanzados", shorttitle="S&R Avanzados", overlay=true)
 
+n = input(8, minval=1, title="Local Length")
+lineWidth = input(1, minval=1, title="Line Width")
+threshold = input(1.5, title="Threshold")
+diagonalTrendlines = input(true, title="Diagonal Trendlines")
+
+// Funciones auxiliares
+distance(x1, y1, x2, y2) =>
+    sqrt(sqr(x2 - x1) + sqr(y2 - y1))
+lineSlope(x1, y1, x2, y2) => (y2 - y1) / (x2 - x1)
+// Función para identificar puntos de giro
+line[] swingPoints = array.new_line(0)
+// Función para contar toques en líneas de tendencia diagonales
+            countTouches(x1, y1, x2, y2) =>
+                var int count = 0
+                for k = 0 to array.size(swingPoints) - 1
+                    x = line.get_x1(swingPoints[k])
+                    y = line.get_y1(swingPoints[k])
+                    if abs(y - (lineSlope(x1, y1, x2, y2) * (x - x1) + y1)) < threshold * syminfo.mintick
+                        count := count + 1
+                count
+// Encontrar mínimos y máximos locales
+localLow = low <= lowest(low, n) and low[1] > lowest(low, n)[1]
+localHigh = high >= highest(high, n) and high[1] < highest(high, n)[1]
+if localLow or localHigh
+    array.unshift(swingPoints, line.new(x1 = bar_index, y1 = close, x2 = bar_index, y2 = close, width = 1, color=color.black))
+// Encontrar niveles de soporte y resistencia
+resistance = 0.0
+support = 0.0
+resistanceTouches = 0
+supportTouches = 0
+for i = 0 to n-1
+    if localHigh[i]
+        resistance := high[i]
+        resistanceTouches := resistanceTouches + 1
+    if localLow[i]
+        support := low[i]
+        supportTouches := supportTouches + 1
+
+
+
+// Encontrar líneas de tendencia
+line[] diagonalSupport = array.new_line(0)
+line[] diagonalResistance = array.new_line(0)
+
+if diagonalTrendlines
+    for i = 0 to array.size(swingPoints) - 2
+        for j = i + 1 to array.size(swingPoints) - 1
+            x1 = line.get_x1(swingPoints[i])
+            y1 = line.get_y1(swingPoints[i])
+            x2 = line.get_x1(swingPoints[j])
+            y2 = line.get_y1(swingPoints[j])
+            slope = lineSlope(x1, y1, x2, y2)
+            
+
+            // Función para determinar si una línea de tendencia es válida
+            bool validTrendline(float x1, float y1, float x2, float y2) =>
+                countTouches(x1, y1, x2, y2) >= 3 and distance(x1, y1, x2, y2) >= threshold * syminfo.mintick
+
+            // Trazar líneas de tendencia diagonales
+            if validTrendline(x1, y1, x2, y2)
+                if slope > 0
+                    array.unshift(diagonalSupport, line.new(x1 = x1, y1 = y1, x2 = bar_index, y2 = lineSlope(x1, y1, x2, y2) * (bar_index - x1) + y1, width = lineWidth, color = color.green, extend = extend.right))
+                else
+                    array.unshift(diagonalResistance, line.new(x1 = x1, y1 = y1, x2 = bar_index, y2 = lineSlope(x1, y1, x2, y2) * (bar_index - x1) + y1, width = lineWidth, color = color.red, extend = extend.right))
+// Función para eliminar líneas de tendencia diagonales duplicadas
+void removeDuplicates(line[] trendlines) =>
+    for i = 0 to array.size(trendlines) - 2
+        if not line.get_extend(trendlines[i]) == extend.none
+            for j = i + 1 to array.size(trendlines) - 1
+                if not line.get_extend(trendlines[j]) == extend.none
+                    x1_i = line.get_x1(trendlines[i])
+                    y1_i = line.get_y1(trendlines[i])
+                    x1_j = line.get_x1(trendlines[j])
+                    y1_j = line.get_y1(trendlines[j])
+                    x2_i = line.get_x2(trendlines[i])
+                    y2_i = line.get_y2(trendlines[i])
+                    x2_j = line.get_x2(trendlines[j])
+                    y2_j = line.get_y2(trendlines[j])
+                    if abs(y1_i - y1_j) < threshold * syminfo.mintick and abs(y2_i - y2_j) < threshold * syminfo.mintick
+                        line.set_extend(trendlines[j], extend.none)
+removeDuplicates(diagonalSupport)
+removeDuplicates(diagonalResistance)
+// Función para filtrar líneas de tendencia diagonales en función de la calidad
+line[] filterTrendlines(line[] trendlines) =>
+    var line[] filteredTrendlines = array.new_line(0)
+    for i = 0 to array.size(trendlines) - 1
+        x1 = line.get_x1(trendlines[i])
+        y1 = line.get_y1(trendlines[i])
+        x2 = line.get_x2(trendlines[i])
+        y2 = line.get_y2(trendlines[i])
+        if validTrendline(x1, y1, x2, y2)
+            array.unshift(filteredTrendlines, trendlines[i])
+    filteredTrendlines
+
+diagonalSupport := filterTrendlines(diagonalSupport)
+diagonalResistance := filterTrendlines(diagonalResistance)
+// Función mejorada para contar toques en líneas horizontales y diagonales
+int countTouches(float x1, float y1, float x2, float y2, bool horizontal) =>
+    var int count = 0
+    for k = 0 to array.size(swingPoints) - 1
+        x = line.get_x1(swingPoints[k])
+        y = line.get_y1(swingPoints[k])
+        if horizontal
+            if abs(y - y1) < threshold * syminfo.mintick
+                count := count + 1
+        else
+            if abs(y - (lineSlope(x1, y1, x2, y2) * (x - x1) + y1)) < threshold * syminfo.mintick
+                count := count + 1
+    count
+
+// Función para filtrar líneas de soporte y resistencia horizontales en función de la calidad
+line[] filterHorizontalSR(line[] srLines) =>
+    var line[] filteredSRLines = array.new_line(0)
+    for i = 0 to array.size(srLines) - 1
+        x1 = line.get_x1(srLines[i])
+        y1 = line.get_y1(srLines[i])
+        x2 = line.get_x2(srLines[i])
+        y2 = line.get_y2(srLines[i])
+        if countTouches(x1, y1, x2, y2, true) >= 3 and distance(x1, y1, x2, y2) >= threshold * syminfo.mintick
+            array.unshift(filteredSRLines, srLines[i])
+    filteredSRLines
+
+// Aplicar filtro de calidad a soportes y resistencias horizontales
+line[] horizontalSupport = array.new_line(0)
+line[] horizontalResistance = array.new_line(0)
+for i = 0 to n-1
+    if localHigh[i]
+        array.unshift(horizontalResistance, line.new(x1 = bar_index - n, y1 = high[i], x2 = bar_index, y2 = high[i], width = lineWidth, color = color.red, extend = extend.right))
+    if localLow[i]
+        array.unshift(horizontalSupport, line.new(x1 = bar_index - n, y1 = low[i], x2 = bar_index, y2 = low[i], width = lineWidth, color = color.green, extend = extend.right))
+
+horizontalSupport := filterHorizontalSR(horizontalSupport)
+horizontalResistance := filterHorizontalSR(horizontalResistance)
+// Función para eliminar líneas de soporte y resistencia horizontales duplicadas
+void removeHorizontalDuplicates(line[] srLines) =>
+    for i = 0 to array.size(srLines) - 2
+        if not line.get_extend(srLines[i]) == extend.none
+            for j = i + 1 to array.size(srLines) - 1
+                if not line.get_extend(srLines[j]) == extend.none
+                    y1_i = line.get_y1(srLines[i])
+                    y1_j = line.get_y1(srLines[j])
+                    if abs(y1_i - y1_j) < threshold * syminfo.mintick
+                        line.set_extend(srLines[j], extend.none)
+
+removeHorizontalDuplicates(horizontalSupport)
+removeHorizontalDuplicates(horizontalResistance)
